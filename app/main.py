@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import engine, SessionLocal
 from app.model import Base, User
+from app.pydatic import UserCreate, UserUpdate, UserResponse
 
 app = FastAPI()
 
@@ -21,20 +22,31 @@ def home():
     return {"message": "E-Commerce Backend is running"}
 
 
-@app.post("/users")
+@app.post("/users", response_model=UserResponse)
 def create_user(
-    name: str,
-    email: str,
+    user_data: UserCreate,
     db: Session = Depends(get_db)
 ):
-    user = User(name=name, email=email)
+    user = User(
+        name=user_data.name,
+        email=user_data.email
+    )
 
     db.add(user)
     db.commit()
     db.refresh(user)
 
     return user
-@app.get("/users/{user_id}")
+
+# GET ALL USERS
+@app.get("/users", response_model=list[UserResponse])
+def get_users(db: Session = Depends(get_db)):
+    users = db.query(User).all()
+
+    return users
+
+
+@app.get("/users/{user_id}", response_model=UserResponse)
 def get_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
 
@@ -55,11 +67,10 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
 
     return {"message": "User deleted successfully"}
 
-@app.put("/users/{user_id}")
+@app.put("/users/{user_id}", response_model=UserResponse)
 def update_user(
     user_id: int,
-    name: str,
-    email: str,
+    user_data: UserUpdate,
     db: Session = Depends(get_db)
 ):
     user = db.query(User).filter(User.id == user_id).first()
@@ -67,8 +78,8 @@ def update_user(
     if not user:
         return {"message": "User not found"}
 
-    user.name = name
-    user.email = email
+    user.name = user_data.name
+    user.email = user_data.email
 
     db.commit()
     db.refresh(user)
