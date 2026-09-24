@@ -5,9 +5,12 @@ import bcrypt
 from app.database import engine, SessionLocal
 from app.model import Base, User
 from app.pydatic import UserCreate, UserUpdate, UserResponse,UserLogin
+from app.auth import create_access_token
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.auth import verify_token
 
 app = FastAPI()
-
+security = HTTPBearer()
 Base.metadata.create_all(bind=engine)
 
 
@@ -17,6 +20,23 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+
+    user_id = verify_token(token)
+
+    if user_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
+    return user_id
+
+
 
 @app.get("/")
 def home():
@@ -57,7 +77,10 @@ def create_user(
 
 # GET ALL USERS
 @app.get("/users", response_model=list[UserResponse])
-def get_users(db: Session = Depends(get_db)):
+def get_users(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
     users = db.query(User).all()
 
     return users
@@ -127,8 +150,11 @@ def login(
             status_code=401,
             detail="Invalid email or password"
         )
-
+    access_token = create_access_token(user.id)
     return {
         "message": "Login successful",
-        "user_id": user.id
+        "access_token": access_token,
+        "token_type": "bearer"
+
     }
+
