@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends,HTTPException
 from sqlalchemy.orm import Session
+import bcrypt
 
 from app.database import engine, SessionLocal
 from app.model import Base, User
-from app.pydatic import UserCreate, UserUpdate, UserResponse
+from app.pydatic import UserCreate, UserUpdate, UserResponse,UserLogin
 
 app = FastAPI()
 
@@ -27,9 +28,25 @@ def create_user(
     user_data: UserCreate,
     db: Session = Depends(get_db)
 ):
+     # Check if email already exists
+    existing_user = db.query(User).filter(
+        User.email == user_data.email
+    ).first()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered"
+        )
+    password_hash = bcrypt.hashpw(
+        user_data.password.encode("utf-8"),
+        bcrypt.gensalt()
+    ).decode("utf-8")
+
     user = User(
         name=user_data.name,
-        email=user_data.email
+        email=user_data.email,
+        password_hash=password_hash
     )
 
     db.add(user)
@@ -45,7 +62,7 @@ def get_users(db: Session = Depends(get_db)):
 
     return users
 
-
+#get a specific user
 @app.get("/users/{user_id}", response_model=UserResponse)
 def get_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -54,7 +71,7 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
         return {"message": "User not found"}
 
     return user
-
+#delete a user
 @app.delete("/users/{user_id}")
 def delete_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -85,3 +102,33 @@ def update_user(
     db.refresh(user)
 
     return user
+
+#login api
+@app.post("/login")
+def login(
+    user_data: UserLogin,
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.email == user_data.email).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
+    password_valid = bcrypt.checkpw(
+        user_data.password.encode("utf-8"),
+        user.password_hash.encode("utf-8")
+    )
+
+    if not password_valid:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
+    return {
+        "message": "Login successful",
+        "user_id": user.id
+    }
