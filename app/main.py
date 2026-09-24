@@ -36,6 +36,26 @@ def get_current_user(
 
     return user_id
 
+def get_admin_user(
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="User not found"
+        )
+
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required"
+        )
+
+    return user
+
 
 
 @app.get("/")
@@ -150,7 +170,7 @@ def login(
             status_code=401,
             detail="Invalid email or password"
         )
-    access_token = create_access_token(user.id)
+    access_token = create_access_token(user.id,user.role)
     return {
         "message": "Login successful",
         "access_token": access_token,
@@ -158,3 +178,12 @@ def login(
 
     }
 
+@app.get("/admin")
+def admin_dashboard(
+    user: User = Depends(get_admin_user)
+):
+    return {
+        "message": "Welcome Admin",
+        "user_id": user.id,
+        "role": user.role
+    }
