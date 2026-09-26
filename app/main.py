@@ -5,18 +5,16 @@ import bcrypt
 from app.database import engine, SessionLocal
 from app.model import Base, User
 from app.pydatic import (
-    UserCreate,
-    UserUpdate,
-    UserLogin,
-    UserResponse,
-    ProductCreate,
-    ProductUpdate,
-    ProductResponse
+     UserCreate, UserUpdate, UserLogin, UserResponse,
+    ProductCreate, ProductUpdate, ProductResponse,
+    CategoryCreate, CategoryUpdate, CategoryResponse
 )
+
 from app.auth import create_access_token
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.auth import verify_token
 from app.product_model import Product
+from app.category_model import Category
 
 app = FastAPI()
 security = HTTPBearer()
@@ -208,7 +206,8 @@ def create_product(
         name=product_data.name,
         description=product_data.description,
         price=product_data.price,
-        stock=product_data.stock
+        stock=product_data.stock,
+        category_id=product_data.category_id
     )
 
     db.add(product)
@@ -271,6 +270,7 @@ def update_product(
     product.description = product_data.description
     product.price = product_data.price
     product.stock = product_data.stock
+    product.category_id = product_data.category_id
 
     db.commit()
     db.refresh(product)
@@ -301,3 +301,101 @@ def delete_product(
     return {
         "message": "Product deleted successfully"
     }
+
+@app.post("/categories", response_model=CategoryResponse)
+def create_category(
+    category_data: CategoryCreate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    existing_category = db.query(Category).filter(
+        Category.name == category_data.name
+    ).first()
+
+    if existing_category:
+        raise HTTPException(
+            status_code=400,
+            detail="Category already exists"
+        )
+
+    category = Category(
+        name=category_data.name
+    )
+
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+
+    return category
+
+@app.get("/categories", response_model=list[CategoryResponse])
+def get_categories(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    return db.query(Category).all()
+
+
+@app.get("/categories/{category_id}", response_model=CategoryResponse)
+def get_category(
+    category_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    category = db.query(Category).filter(
+        Category.id == category_id
+    ).first()
+
+    if not category:
+        raise HTTPException(
+            status_code=404,
+            detail="Category not found"
+        )
+
+    return category
+
+@app.put("/categories/{category_id}", response_model=CategoryResponse)
+def update_category(
+    category_id: int,
+    category_data: CategoryUpdate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    category = db.query(Category).filter(
+        Category.id == category_id
+    ).first()
+
+    if not category:
+        raise HTTPException(
+            status_code=404,
+            detail="Category not found"
+        )
+
+    category.name = category_data.name
+
+    db.commit()
+    db.refresh(category)
+
+    return category
+
+
+@app.delete("/categories/{category_id}")
+def delete_category(
+    category_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    category = db.query(Category).filter(
+        Category.id == category_id
+    ).first()
+
+    if not category:
+        raise HTTPException(
+            status_code=404,
+            detail="Category not found"
+        )
+
+    db.delete(category)
+    db.commit()
+
+    return {"message": "Category deleted successfully"}

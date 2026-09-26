@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text
+from sqlalchemy import Column, Integer, String, Float, Text,ForeignKey
 from app.database import Base
 
 
@@ -10,3 +10,8 @@ class Product(Base):
     description = Column(Text, nullable=True)
     price = Column(Float, nullable=False)
     stock = Column(Integer, nullable=False, default=0)
+    category_id = Column(
+        Integer,
+        ForeignKey("categories.id"),
+        nullable=False
+    )

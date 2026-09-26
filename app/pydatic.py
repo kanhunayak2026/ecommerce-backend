@@ -16,9 +16,9 @@ class UserResponse(BaseModel):
     id: int
     name: str
     email: str
-    
+
     class Config:
-            from_attributes = True
+        from_attributes = True
     
 
 class UserLogin(BaseModel):
@@ -30,6 +30,7 @@ class ProductCreate(BaseModel):
     description: str | None = None
     price: float
     stock: int
+    category_id: int
 
 
 class ProductUpdate(BaseModel):
@@ -37,6 +38,7 @@ class ProductUpdate(BaseModel):
     description: str | None = None
     price: float
     stock: int
+    category_id: int
 
 
 class ProductResponse(BaseModel):
@@ -45,6 +47,23 @@ class ProductResponse(BaseModel):
     description: str | None
     price: float
     stock: int
+    category_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class CategoryCreate(BaseModel):
+    name: str
+
+
+class CategoryUpdate(BaseModel):
+    name: str
+
+
+class CategoryResponse(BaseModel):
+    id: int
+    name: str
 
     class Config:
         from_attributes = True
