@@ -1,5 +1,4 @@
-from pydantic import BaseModel
-
+from pydantic import BaseModel,Field,field_validator
 
 class UserCreate(BaseModel):
     name: str
@@ -26,18 +25,18 @@ class UserLogin(BaseModel):
     password: str
 
 class ProductCreate(BaseModel):
-    name: str
+    name: str= Field(min_length=1)
     description: str | None = None
-    price: float
-    stock: int
+    price: float =Field(gt=0)
+    stock: int = Field(gt=0)
     category_id: int
 
 
 class ProductUpdate(BaseModel):
     name: str
     description: str | None = None
-    price: float
-    stock: int
+    price: float= Field(gt=0)
+    stock: int=Field(gt=0)
     category_id: int
 
 

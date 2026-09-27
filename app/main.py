@@ -202,6 +202,15 @@ def create_product(
     db: Session = Depends(get_db),
     admin_user: User = Depends(get_admin_user)
 ):
+    category = db.query(Category).filter(
+    Category.id == product_data.category_id
+    ).first()
+
+    if not category:
+     raise HTTPException(
+        status_code=400,
+        detail="Category not found"
+    )
     product = Product(
         name=product_data.name,
         description=product_data.description,
@@ -265,7 +274,15 @@ def update_product(
             status_code=404,
             detail="Product not found"
         )
+    category = db.query(Category).filter(
+     Category.id == product_data.category_id
+    ).first()
 
+    if not category:
+     raise HTTPException(
+        status_code=400,
+        detail="Category not found"
+    )
     product.name = product_data.name
     product.description = product_data.description
     product.price = product_data.price
