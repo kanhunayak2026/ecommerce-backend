@@ -1,7 +1,464 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends,HTTPException,Query
+from sqlalchemy.orm import Session
+import bcrypt
+from typing import Literal
 
-app=FastAPI()
+from app.database import engine, SessionLocal
+from app.model import Base, User
+from app.pydatic import (
+     UserCreate, UserUpdate, UserLogin, UserResponse,
+    ProductCreate, ProductUpdate, ProductResponse,
+    CategoryCreate, CategoryUpdate, CategoryResponse
+)
+
+from app.auth import create_access_token
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.auth import verify_token
+from app.product_model import Product
+from app.category_model import Category
+
+app = FastAPI()
+security = HTTPBearer()
+Base.metadata.create_all(bind=engine)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+
+    user_id = verify_token(token)
+
+    if user_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
+    return user_id
+
+def get_admin_user(
+    user_id: int = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="User not found"
+        )
+
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required"
+        )
+
+    return user
+
+
 
 @app.get("/")
 def home():
     return {"message": "E-Commerce Backend is running"}
+
+
+@app.post("/users", response_model=UserResponse)
+def create_user(
+    user_data: UserCreate,
+    db: Session = Depends(get_db)
+):
+     # Check if email already exists
+    existing_user = db.query(User).filter(
+        User.email == user_data.email
+    ).first()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered"
+        )
+    password_hash = bcrypt.hashpw(
+        user_data.password.encode("utf-8"),
+        bcrypt.gensalt()
+    ).decode("utf-8")
+
+    user = User(
+        name=user_data.name,
+        email=user_data.email,
+        password_hash=password_hash
+    )
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return user
+
+# GET ALL USERS
+@app.get("/users", response_model=list[UserResponse])
+def get_users(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    users = db.query(User).all()
+
+    return users
+
+#get a specific user
+@app.get("/users/{user_id}", response_model=UserResponse)
+def get_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+
+    if not user:
+        return {"message": "User not found"}
+
+    return user
+#delete a user
+@app.delete("/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+
+    if not user:
+        return {"message": "User not found"}
+
+    db.delete(user)
+    db.commit()
+
+    return {"message": "User deleted successfully"}
+
+@app.put("/users/{user_id}", response_model=UserResponse)
+def update_user(
+    user_id: int,
+    user_data: UserUpdate,
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+
+    if not user:
+        return {"message": "User not found"}
+
+    user.name = user_data.name
+    user.email = user_data.email
+
+    db.commit()
+    db.refresh(user)
+
+    return user
+
+#login api
+@app.post("/login")
+def login(
+    user_data: UserLogin,
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.email == user_data.email).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
+    password_valid = bcrypt.checkpw(
+        user_data.password.encode("utf-8"),
+        user.password_hash.encode("utf-8")
+    )
+
+    if not password_valid:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+    access_token = create_access_token(user.id,user.role)
+    return {
+        "message": "Login successful",
+        "access_token": access_token,
+        "token_type": "bearer"
+
+    }
+
+@app.get("/admin")
+def admin_dashboard(
+    user: User = Depends(get_admin_user)
+):
+    return {
+        "message": "Welcome Admin",
+        "user_id": user.id,
+        "role": user.role
+    }
+
+# CREATE PRODUCT - ADMIN ONLY
+@app.post("/products", response_model=ProductResponse)
+def create_product(
+    product_data: ProductCreate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    category = db.query(Category).filter(
+    Category.id == product_data.category_id
+    ).first()
+
+    if not category:
+     raise HTTPException(
+        status_code=400,
+        detail="Category not found"
+    )
+    product = Product(
+        name=product_data.name,
+        description=product_data.description,
+        price=product_data.price,
+        stock=product_data.stock,
+        category_id=product_data.category_id
+    )
+
+    db.add(product)
+    db.commit()
+    db.refresh(product)
+
+    return product
+
+
+# GET ALL PRODUCTS - AUTHENTICATED USERS
+@app.get("/products", response_model=list[ProductResponse])
+def get_products(
+    search: str | None = None,
+    category_id: int | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
+    sort_by: Literal["price", "name", "stock", "id"] | None = None,
+    order: Literal["asc", "desc"] = "asc",
+    # Pagination
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1),
+
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    query = db.query(Product)
+
+    if search:
+        query = query.filter(
+            Product.name.ilike(f"%{search}%")
+        )
+
+    if category_id:
+        query = query.filter(
+            Product.category_id == category_id
+        )
+
+    if min_price is not None:
+        query=query.filter(Product.price>=min_price)
+
+    if max_price is not None:
+        query=query.filter(Product.price<=max_price)
+
+    sort_fields = {
+        "price": Product.price,
+        "name": Product.name,
+        "stock": Product.stock,
+        "id": Product.id
+    }
+
+    if sort_by in sort_fields:
+        column = sort_fields[sort_by]
+
+        if order == "desc":
+            query = query.order_by(column.desc())
+        else:
+            query = query.order_by(column.asc())
+    # Pagination
+    offset = (page - 1) * limit
+
+    query = query.offset(offset).limit(limit)
+
+    return query.all()
+    
+
+# GET ONE PRODUCT - AUTHENTICATED USERS
+@app.get("/products/{product_id}", response_model=ProductResponse)
+def get_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    product = db.query(Product).filter(
+        Product.id == product_id
+    ).first()
+
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    return product
+
+
+# UPDATE PRODUCT - ADMIN ONLY
+@app.put("/products/{product_id}", response_model=ProductResponse)
+def update_product(
+    product_id: int,
+    product_data: ProductUpdate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    product = db.query(Product).filter(
+        Product.id == product_id
+    ).first()
+
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+    category = db.query(Category).filter(
+     Category.id == product_data.category_id
+    ).first()
+
+    if not category:
+     raise HTTPException(
+        status_code=400,
+        detail="Category not found"
+    )
+    product.name = product_data.name
+    product.description = product_data.description
+    product.price = product_data.price
+    product.stock = product_data.stock
+    product.category_id = product_data.category_id
+
+    db.commit()
+    db.refresh(product)
+
+    return product
+
+
+# DELETE PRODUCT - ADMIN ONLY
+@app.delete("/products/{product_id}")
+def delete_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    product = db.query(Product).filter(
+        Product.id == product_id
+    ).first()
+
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    db.delete(product)
+    db.commit()
+
+    return {
+        "message": "Product deleted successfully"
+    }
+
+@app.post("/categories", response_model=CategoryResponse)
+def create_category(
+    category_data: CategoryCreate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    existing_category = db.query(Category).filter(
+        Category.name == category_data.name
+    ).first()
+
+    if existing_category:
+        raise HTTPException(
+            status_code=400,
+            detail="Category already exists"
+        )
+
+    category = Category(
+        name=category_data.name
+    )
+
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+
+    return category
+
+@app.get("/categories", response_model=list[CategoryResponse])
+def get_categories(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    return db.query(Category).all()
+
+
+@app.get("/categories/{category_id}", response_model=CategoryResponse)
+def get_category(
+    category_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    category = db.query(Category).filter(
+        Category.id == category_id
+    ).first()
+
+    if not category:
+        raise HTTPException(
+            status_code=404,
+            detail="Category not found"
+        )
+
+    return category
+
+@app.put("/categories/{category_id}", response_model=CategoryResponse)
+def update_category(
+    category_id: int,
+    category_data: CategoryUpdate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    category = db.query(Category).filter(
+        Category.id == category_id
+    ).first()
+
+    if not category:
+        raise HTTPException(
+            status_code=404,
+            detail="Category not found"
+        )
+
+    category.name = category_data.name
+
+    db.commit()
+    db.refresh(category)
+
+    return category
+
+
+@app.delete("/categories/{category_id}")
+def delete_category(
+    category_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    category = db.query(Category).filter(
+        Category.id == category_id
+    ).first()
+
+    if not category:
+        raise HTTPException(
+            status_code=404,
+            detail="Category not found"
+        )
+
+    db.delete(category)
+    db.commit()
+
+    return {"message": "Category deleted successfully"}
