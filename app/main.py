@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends,HTTPException
 from sqlalchemy.orm import Session
 import bcrypt
+from typing import Literal
 
 from app.database import engine, SessionLocal
 from app.model import Base, User
@@ -229,13 +230,49 @@ def create_product(
 # GET ALL PRODUCTS - AUTHENTICATED USERS
 @app.get("/products", response_model=list[ProductResponse])
 def get_products(
+    search: str | None = None,
+    category_id: int | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
+    sort_by: Literal["price", "name", "stock", "id"] | None = None,
+    order: Literal["asc", "desc"] = "asc",
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user)
 ):
-    products = db.query(Product).all()
+    query = db.query(Product)
 
-    return products
+    if search:
+        query = query.filter(
+            Product.name.ilike(f"%{search}%")
+        )
 
+    if category_id:
+        query = query.filter(
+            Product.category_id == category_id
+        )
+
+    if min_price is not None:
+        query=query.filter(Product.price>=min_price)
+
+    if max_price is not None:
+        query=query.filter(Product.price<=max_price)
+
+    sort_fields = {
+        "price": Product.price,
+        "name": Product.name,
+        "stock": Product.stock,
+        "id": Product.id
+    }
+
+    if sort_by in sort_fields:
+        column = sort_fields[sort_by]
+
+        if order == "desc":
+            query = query.order_by(column.desc())
+        else:
+            query = query.order_by(column.asc())
+
+    return query.all()
 
 # GET ONE PRODUCT - AUTHENTICATED USERS
 @app.get("/products/{product_id}", response_model=ProductResponse)
