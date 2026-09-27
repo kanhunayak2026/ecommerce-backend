@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends,HTTPException
+from fastapi import FastAPI, Depends,HTTPException,Query
 from sqlalchemy.orm import Session
 import bcrypt
 from typing import Literal
@@ -236,6 +236,10 @@ def get_products(
     max_price: float | None = None,
     sort_by: Literal["price", "name", "stock", "id"] | None = None,
     order: Literal["asc", "desc"] = "asc",
+    # Pagination
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1),
+
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user)
 ):
@@ -271,8 +275,13 @@ def get_products(
             query = query.order_by(column.desc())
         else:
             query = query.order_by(column.asc())
+    # Pagination
+    offset = (page - 1) * limit
+
+    query = query.offset(offset).limit(limit)
 
     return query.all()
+    
 
 # GET ONE PRODUCT - AUTHENTICATED USERS
 @app.get("/products/{product_id}", response_model=ProductResponse)
