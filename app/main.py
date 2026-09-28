@@ -8,7 +8,9 @@ from app.model import Base, User
 from app.pydatic import (
      UserCreate, UserUpdate, UserLogin, UserResponse,
     ProductCreate, ProductUpdate, ProductResponse,
-    CategoryCreate, CategoryUpdate, CategoryResponse
+    CategoryCreate, CategoryUpdate, CategoryResponse,
+    CartItemCreate,CartItemUpdate,CartItemResponse
+
 )
 
 from app.auth import create_access_token
@@ -16,6 +18,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.auth import verify_token
 from app.product_model import Product
 from app.category_model import Category
+from app import cart_model
+from app.cart_model import Cart, CartItem
 
 app = FastAPI()
 security = HTTPBearer()
@@ -462,3 +466,161 @@ def delete_category(
     db.commit()
 
     return {"message": "Category deleted successfully"}
+
+
+@app.post("/cart/items", response_model=CartItemResponse)
+def add_to_cart(
+    cart_item: CartItemCreate,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    # Check product exists
+    product = db.query(Product).filter(
+        Product.id == cart_item.product_id
+    ).first()
+
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    # Find user's cart
+    cart = db.query(Cart).filter(
+        Cart.user_id == user_id
+    ).first()
+
+    # Create cart if it doesn't exist
+    if not cart:
+        cart = Cart(user_id=user_id)
+        db.add(cart)
+        db.commit()
+        db.refresh(cart)
+
+    # Check if product is already in cart
+    existing_item = db.query(CartItem).filter(
+        CartItem.cart_id == cart.id,
+        CartItem.product_id == cart_item.product_id
+    ).first()
+
+    if existing_item:
+        existing_item.quantity += cart_item.quantity
+    else:
+        existing_item = CartItem(
+            cart_id=cart.id,
+            product_id=cart_item.product_id,
+            quantity=cart_item.quantity
+        )
+        db.add(existing_item)
+
+    db.commit()
+    db.refresh(existing_item)
+
+    return existing_item
+
+@app.get("/cart", response_model=list[CartItemResponse])
+def get_cart(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    cart = db.query(Cart).filter(
+        Cart.user_id == user_id
+    ).first()
+
+    if not cart:
+        return []
+
+    cart_items = db.query(CartItem).filter(
+        CartItem.cart_id == cart.id
+    ).all()
+
+    return cart_items
+
+@app.delete("/cart/items/{item_id}")
+def remove_cart_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    cart = db.query(Cart).filter(
+        Cart.user_id == user_id
+    ).first()
+
+    if not cart:
+        raise HTTPException(
+            status_code=404,
+            detail="Cart not found"
+        )
+
+    item = db.query(CartItem).filter(
+        CartItem.id == item_id,
+        CartItem.cart_id == cart.id
+    ).first()
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Cart item not found"
+        )
+
+    db.delete(item)
+    db.commit()
+
+    return {"message": "Cart item removed successfully"}
+@app.put("/cart/items/{item_id}", response_model=CartItemResponse)
+def update_cart_item(
+    item_id: int,
+    cart_item: CartItemUpdate,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    cart = db.query(Cart).filter(
+        Cart.user_id == user_id
+    ).first()
+
+    if not cart:
+        raise HTTPException(
+            status_code=404,
+            detail="Cart not found"
+        )
+
+    item = db.query(CartItem).filter(
+        CartItem.id == item_id,
+        CartItem.cart_id == cart.id
+    ).first()
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Cart item not found"
+        )
+
+    item.quantity = cart_item.quantity
+
+    db.commit()
+    db.refresh(item)
+
+    return item
+
+@app.delete("/cart")
+def clear_cart(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    cart = db.query(Cart).filter(
+        Cart.user_id == user_id
+    ).first()
+
+    if not cart:
+        raise HTTPException(
+            status_code=404,
+            detail="Cart not found"
+        )
+
+    db.query(CartItem).filter(
+        CartItem.cart_id == cart.id
+    ).delete(synchronize_session=False)
+
+    db.commit()
+
+    return {"message": "Cart cleared successfully"}
