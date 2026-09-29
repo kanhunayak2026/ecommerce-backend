@@ -1,4 +1,5 @@
 from pydantic import BaseModel,Field,field_validator
+from typing import Literal
 
 class UserCreate(BaseModel):
     name: str
@@ -83,3 +84,31 @@ class CartItemResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class OrderItemResponse(BaseModel):
+    id: int
+    product_id: int
+    quantity: int
+    price: float
+
+    class Config:
+        from_attributes = True
+
+
+class OrderResponse(BaseModel):
+    id: int
+    total_amount: float
+    status: str
+    items: list[OrderItemResponse] = []
+
+    class Config:
+        from_attributes = True
+
+class OrderStatusUpdate(BaseModel):
+    status: Literal[
+        "pending",
+        "confirmed",
+        "shipped",
+        "delivered",
+        "cancelled"
+    ]

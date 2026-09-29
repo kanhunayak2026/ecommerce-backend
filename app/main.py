@@ -9,7 +9,8 @@ from app.pydatic import (
      UserCreate, UserUpdate, UserLogin, UserResponse,
     ProductCreate, ProductUpdate, ProductResponse,
     CategoryCreate, CategoryUpdate, CategoryResponse,
-    CartItemCreate,CartItemUpdate,CartItemResponse
+    CartItemCreate,CartItemUpdate,CartItemResponse,
+    OrderResponse,OrderStatusUpdate
 
 )
 
@@ -19,6 +20,9 @@ from app.auth import verify_token
 from app.product_model import Product
 from app.category_model import Category
 from app import cart_model
+from app.cart_model import Cart, CartItem
+from app import order_model
+from app.order_model import Order, OrderItem
 from app.cart_model import Cart, CartItem
 
 app = FastAPI()
@@ -624,3 +628,233 @@ def clear_cart(
     db.commit()
 
     return {"message": "Cart cleared successfully"}
+
+@app.post("/orders", response_model=OrderResponse)
+def create_order(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    # Find user's cart
+    cart = db.query(Cart).filter(
+        Cart.user_id == user_id
+    ).first()
+
+    if not cart:
+        raise HTTPException(
+            status_code=404,
+            detail="Cart not found"
+        )
+
+    # Get cart items
+    cart_items = db.query(CartItem).filter(
+        CartItem.cart_id == cart.id
+    ).all()
+
+    if not cart_items:
+        raise HTTPException(
+            status_code=400,
+            detail="Cart is empty"
+        )
+
+    # Check products and stock
+    total_amount = 0
+
+    for item in cart_items:
+        product = db.query(Product).filter(
+            Product.id == item.product_id
+        ).first()
+
+        if not product:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Product {item.product_id} not found"
+            )
+
+        if product.stock < item.quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Not enough stock for {product.name}"
+            )
+
+        total_amount += product.price * item.quantity
+
+    # Create order
+    order = Order(
+        user_id=user_id,
+        total_amount=total_amount,
+        status="pending"
+    )
+
+    db.add(order)
+    db.flush()
+
+    # Create order items and reduce stock
+    for item in cart_items:
+        product = db.query(Product).filter(
+            Product.id == item.product_id
+        ).first()
+
+        order_item = OrderItem(
+            order_id=order.id,
+            product_id=product.id,
+            quantity=item.quantity,
+            price=product.price
+        )
+
+        db.add(order_item)
+
+        product.stock -= item.quantity
+
+    # Clear cart
+    db.query(CartItem).filter(
+        CartItem.cart_id == cart.id
+    ).delete(synchronize_session=False)
+
+    db.commit()
+    db.refresh(order)
+
+    order_items = db.query(OrderItem).filter(
+    OrderItem.order_id == order.id
+).all()
+
+    return {
+     "id": order.id,
+     "total_amount": order.total_amount,
+     "status": order.status,
+     "items": order_items
+    }
+
+@app.get("/orders", response_model=list[OrderResponse])
+def get_orders(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    orders = db.query(Order).filter(
+        Order.user_id == user_id
+    ).all()
+
+    result = []
+
+    for order in orders:
+        items = db.query(OrderItem).filter(
+            OrderItem.order_id == order.id
+        ).all()
+
+        result.append({
+            "id": order.id,
+            "total_amount": order.total_amount,
+            "status": order.status,
+            "items": items
+        })
+
+    return result
+
+@app.get("/orders/{order_id}", response_model=OrderResponse)
+def get_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.user_id == user_id
+    ).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=404,
+            detail="Order not found"
+        )
+
+    items = db.query(OrderItem).filter(
+        OrderItem.order_id == order.id
+    ).all()
+
+    return {
+        "id": order.id,
+        "total_amount": order.total_amount,
+        "status": order.status,
+        "items": items
+    }
+
+@app.put("/orders/{order_id}/status", response_model=OrderResponse)
+def update_order_status(
+    order_id: int,
+    status_data: OrderStatusUpdate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    order = db.query(Order).filter(
+        Order.id == order_id
+    ).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=404,
+            detail="Order not found"
+        )
+
+    order.status = status_data.status
+
+    db.commit()
+    db.refresh(order)
+
+    items = db.query(OrderItem).filter(
+        OrderItem.order_id == order.id
+    ).all()
+
+    return {
+        "id": order.id,
+        "total_amount": order.total_amount,
+        "status": order.status,
+        "items": items
+    }
+@app.put("/orders/{order_id}/cancel", response_model=OrderResponse)
+def cancel_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.user_id == user_id
+    ).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=404,
+            detail="Order not found"
+        )
+
+    if order.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail="Only pending orders can be cancelled"
+        )
+
+    # Get order items
+    order_items = db.query(OrderItem).filter(
+        OrderItem.order_id == order.id
+    ).all()
+
+    # Restore product stock
+    for item in order_items:
+        product = db.query(Product).filter(
+            Product.id == item.product_id
+        ).first()
+
+        if product:
+            product.stock += item.quantity
+
+    # Cancel order
+    order.status = "cancelled"
+
+    db.commit()
+    db.refresh(order)
+
+    return {
+        "id": order.id,
+        "total_amount": order.total_amount,
+        "status": order.status,
+        "items": order_items
+    }
