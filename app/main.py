@@ -1,8 +1,9 @@
-from fastapi import FastAPI, Depends,HTTPException,Query
+from fastapi import FastAPI, Depends,HTTPException,Query,Request
 from sqlalchemy.orm import Session
 import bcrypt
 from typing import Literal
 from app.redis_client import redis_client
+from app.rate_limit import rate_limit
 import json
 
 from app.database import engine, SessionLocal
@@ -172,9 +173,11 @@ def update_user(
 #login api
 @app.post("/login")
 def login(
+    request: Request,
     user_data: UserLogin,
     db: Session = Depends(get_db)
 ):
+    rate_limit(request, limit=5, window=60)
     user = db.query(User).filter(User.email == user_data.email).first()
 
     if not user:
