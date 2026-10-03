@@ -2,6 +2,8 @@ from fastapi import FastAPI, Depends,HTTPException,Query
 from sqlalchemy.orm import Session
 import bcrypt
 from typing import Literal
+from app.redis_client import redis_client
+import json
 
 from app.database import engine, SessionLocal
 from app.model import Base, User
@@ -26,6 +28,11 @@ from app.order_model import Order, OrderItem
 from app.cart_model import Cart, CartItem
 
 app = FastAPI()
+def clear_product_cache():
+    keys = redis_client.keys("products:*")
+
+    if keys:
+        redis_client.delete(*keys)
 security = HTTPBearer()
 Base.metadata.create_all(bind=engine)
 
@@ -231,6 +238,7 @@ def create_product(
     db.add(product)
     db.commit()
     db.refresh(product)
+    clear_product_cache()
 
     return product
 
@@ -244,13 +252,31 @@ def get_products(
     max_price: float | None = None,
     sort_by: Literal["price", "name", "stock", "id"] | None = None,
     order: Literal["asc", "desc"] = "asc",
-    # Pagination
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1),
-
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user)
 ):
+    # Create a unique cache key based on the request parameters
+    cache_key = (
+        f"products:"
+        f"search={search}:"
+        f"category={category_id}:"
+        f"min={min_price}:"
+        f"max={max_price}:"
+        f"sort={sort_by}:"
+        f"order={order}:"
+        f"page={page}:"
+        f"limit={limit}"
+    )
+
+    # 1. Check Redis
+    cached_products = redis_client.get(cache_key)
+
+    if cached_products:
+        return json.loads(cached_products)
+
+    # 2. If not in Redis, query MySQL
     query = db.query(Product)
 
     if search:
@@ -264,11 +290,16 @@ def get_products(
         )
 
     if min_price is not None:
-        query=query.filter(Product.price>=min_price)
+        query = query.filter(
+            Product.price >= min_price
+        )
 
     if max_price is not None:
-        query=query.filter(Product.price<=max_price)
+        query = query.filter(
+            Product.price <= max_price
+        )
 
+    # 3. Sorting
     sort_fields = {
         "price": Product.price,
         "name": Product.name,
@@ -283,13 +314,36 @@ def get_products(
             query = query.order_by(column.desc())
         else:
             query = query.order_by(column.asc())
-    # Pagination
+
+    # 4. Pagination
     offset = (page - 1) * limit
 
     query = query.offset(offset).limit(limit)
 
-    return query.all()
-    
+    products = query.all()
+
+    # 5. Convert products to JSON-compatible data
+    product_data = [
+        {
+            "id": product.id,
+            "name": product.name,
+            "description": product.description,
+            "price": product.price,
+            "stock": product.stock,
+            "category_id": product.category_id
+        }
+        for product in products
+    ]
+
+    # 6. Store result in Redis for 60 seconds
+    redis_client.setex(
+        cache_key,
+        120,
+        json.dumps(product_data)
+    )
+
+    # 7. Return data
+    return product_data
 
 # GET ONE PRODUCT - AUTHENTICATED USERS
 @app.get("/products/{product_id}", response_model=ProductResponse)
@@ -345,6 +399,7 @@ def update_product(
 
     db.commit()
     db.refresh(product)
+    clear_product_cache()
 
     return product
 
@@ -396,6 +451,7 @@ def create_category(
     db.add(category)
     db.commit()
     db.refresh(category)
+    clear_product_cache()
 
     return category
 
