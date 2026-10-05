@@ -27,6 +27,7 @@ from app.cart_model import Cart, CartItem
 from app import order_model
 from app.order_model import Order, OrderItem
 from app.cart_model import Cart, CartItem
+from app.logging_config import logger
 
 app = FastAPI()
 def clear_product_cache():
@@ -197,6 +198,7 @@ def login(
             detail="Invalid email or password"
         )
     access_token = create_access_token(user.id,user.role)
+    logger.info(f"User logged in: id={user.id}")
     return {
         "message": "Login successful",
         "access_token": access_token,
@@ -242,6 +244,9 @@ def create_product(
     db.commit()
     db.refresh(product)
     clear_product_cache()
+    logger.info(
+    f"Product created: id={product.id}, name={product.name}"
+    )
 
     return product
 
@@ -403,6 +408,7 @@ def update_product(
     db.commit()
     db.refresh(product)
     clear_product_cache()
+    logger.info(f"Product updated: id={product.id}")
 
     return product
 
@@ -426,6 +432,7 @@ def delete_product(
 
     db.delete(product)
     db.commit()
+    logger.info(f"Product deleted: id={product.id}")
 
     return {
         "message": "Product deleted successfully"
@@ -774,7 +781,8 @@ def create_order(
 
     order_items = db.query(OrderItem).filter(
     OrderItem.order_id == order.id
-).all()
+    ).all()
+    logger.info(f"Order created: id={order.id}, user_id={user_id}")
 
     return {
      "id": order.id,
