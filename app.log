@@ -1,3 +1,7 @@
 2026-10-05 23:41:58,267 - INFO - Product created: id=60, name=toys
 2026-10-05 23:52:14,386 - INFO - User logged in: id=3
 2026-10-07 21:21:51,938 - INFO - User logged in: id=3
+2026-10-08 22:25:46,078 - INFO - User logged in: id=4
+2026-10-08 22:25:46,082 - INFO - HTTP Request: POST http://testserver/login "HTTP/1.1 200 OK"
+2026-10-08 22:25:46,293 - INFO - HTTP Request: GET http://testserver/products?page=1&limit=10 "HTTP/1.1 200 OK"
+2026-10-08 22:25:46,305 - INFO - HTTP Request: GET http://testserver/products?page=1&limit=10 "HTTP/1.1 200 OK"
