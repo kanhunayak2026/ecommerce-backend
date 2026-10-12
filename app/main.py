@@ -178,7 +178,7 @@ def login(
     user_data: UserLogin,
     db: Session = Depends(get_db)
 ):
-    rate_limit(request, limit=5, window=60)
+    rate_limit(request, limit=500, window=60)
     user = db.query(User).filter(User.email == user_data.email).first()
 
     if not user:

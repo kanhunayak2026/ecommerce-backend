@@ -4,7 +4,7 @@ from app.redis_client import redis_client
 
 def rate_limit(
     request: Request,
-    limit: int = 5,
+    limit: int = 50,
     window: int = 60
 ):
     client_ip = request.client.host
